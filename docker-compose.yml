@@ -1,0 +1,55 @@
+version: "3.7"
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.8-management-alpine
+    container_name: 'rabbitmq'
+    ports:
+        - 5672:5672
+        - 15672:15672
+    volumes:
+        - ~/.docker-conf/rabbitmq/data/:/var/lib/rabbitmq/
+        - ~/.docker-conf/rabbitmq/log/:/var/log/rabbitmq
+    healthcheck:
+        test: ["CMD", "curl", "-f", "http://localhost:15672"]
+        interval: 10s
+        timeout: 10s
+        retries: 10
+  database:
+    image: mysql:5.7
+    restart: unless-stopped
+    env_file: ./.env
+    environment:
+      - MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
+      - MYSQL_DATABASE=$MYSQL_DATABASE
+    ports:
+      - $MYSQL_LOCAL_PORT:3306
+    volumes:
+      - db:/var/lib/mysql
+  consumer:
+    build: ./consumer
+    command: bash -c "while !</dev/tcp/database/3306; do sleep 1; done; npm run build && npm run typeorm migration:run && npm run start"
+    environment:
+      - DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK_URL
+      - AMQP_URL=$AMQP_URL
+      - DATABASE_HOST=database
+      - DATABASE_USER=root
+      - DATABASE_PASSWORD=$MYSQL_ROOT_PASSWORD
+      - DATABASE_NAME=$MYSQL_DATABASE
+      - DATABASE_LOCAL_PORT=$MYSQL_LOCAL_PORT
+    restart: on-failure
+    depends_on:
+      - database
+      - rabbitmq
+    links: 
+        - rabbitmq
+  producer:
+    build: ./producer
+    command: npm run start
+    environment:
+      - AMQP_URL=$AMQP_URL
+    depends_on:
+      - rabbitmq
+    restart: on-failure
+volumes:
+  db:
